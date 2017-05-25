@@ -25,7 +25,7 @@
 # 3. Clusters plots (and those isolated clusters if exist in separate csv files) for each 
 # programme * VM combination
 #
-# Duration: ~30 Sec for each VM
+# Duration: ~30 to 60 Sec for each VM
 #              
 # STEPS:  
 # Step 1 Load libs & prep the env, assign parameters, etc.
@@ -61,25 +61,29 @@ require("gridExtra")
 # Modelling packages
 require("rpart")
 require("cluster")
-require("fpc")   
+require("fpc")
+require("dbscan")
 
 # Local parameters
 cpu_to_use=4      # Used for parallel processing if needed
 VM='T1'           # Indicate the virtual machine of interest
 
 
-## Directory paths - change to your local drive / server as appropriate
+# ## Directory paths - change to your local drive / server as appropriate
+# 
+# # Source code location
+# sourcepath="C:\\Users\\hedjv\\Documents\\Code\\R\\Cloud_Monitoring\\"
+# 
+# # Data files location
+# path="C:\\Users\\hedjv\\Dropbox\\VM-Profile-Classifier\\2015\\T-All\\"
+# 
+# # Output location
+# output=paste("C:\\Users\\hedjv\\Documents\\Output\\VM-Profile-Classifier\\2015\\T-All Output\\",VM,"\\",sep="")
 
-# Source code location
-sourcepath="C:\\Users\\hedjv\\Documents\\Code\\R\\Cloud_Monitoring\\"
-
-# Data files location
-path=paste("C:\\Users\\hedjv\\Dropbox\\VM-Profile-Classifier\\2015\\T-All\\",sep="")
-
-# Output location
-output=paste("C:\\Users\\hedjv\\Documents\\Output\\VM-Profile-Classifier\\2015\\T-All Output\\",VM,"\\",sep="")
-
-
+# Directory Paths - Work
+sourcepath="C:\\Users\\mhejvani\\Documents\\MyProjects\\IAAS_ML\\Codes\\"
+path="C:\\Users\\mhejvani\\Documents\\MyProjects\\IAAS_ML\\Data\\T-All\\"
+output=paste0("C:\\Users\\mhejvani\\Documents\\MyProjects\\IAAS_ML\\Outputs\\",VM,"\\",sep="")
 
 
 #### Step 2 Sourcing data (& codes if used external - note: place source codes in 'sourcepath') #### 
@@ -310,6 +314,7 @@ var.importance=
     
     
     ## Clustering
+    ## PAM clustering - method 1
     
     # Extract the distance matrix - Minkowski: P = 1 for Euclidean and 2 for Manhattan 
     d=dist(clust.data2, method = "minkowski", p = 2)
@@ -328,29 +333,28 @@ var.importance=
     dev.off()
     
     ## Find isolated clusters
-    clust.info=data.frame(pam.fit$clusinfo)
-    isolated=row.names(clust.info[which(clust.info$size<=
-                                          floor(0.05*max(as.numeric(as.character(clust.data$Run))))),]) 
-    # Expert input: biggest integer smaller than 0.05*(number of runs)
     
-    if(length(isolated)>=1){
-      
-      isolated.clusters=foreach(i=(1:length(isolated)), .combine=rbind)%do%{
-        isolated.sets=pam.clust[which(pam.clust$Cluster==paste(isolated[i])),]
-        isolated.sets
-      }
-    }
+    # Expert input: The biggest integer smaller than 0.05*(number of runs) is the threshold
+    # for cluster size to nominate as potential anomaly
+    thresh=floor(0.05*max(as.numeric(as.character(clust.data$Run))))
     
+    # Find isolated clusters
+    clust.count=aggregate(pam.clust$Cluster,by=list(pam.clust$Cluster),FUN=length)
+    colnames(clust.count)=c("Cluster","Count")
+    isolated=clust.count[which(clust.count$Count<= thresh),]
+    isolated.clusters=pam.clust[which(pam.clust$Cluster==isolated$Cluster),]
+
     # Export the isolated cluster list (if exisit)
-    if(exists("isolated.clusters")==TRUE){
+    if(nrow(isolated.clusters)!=0){
       write.csv(isolated.clusters,paste(output,"pam_isolated_",list[j],".csv",sep=""))
       rm(isolated.clusters)
     }
     
-    ## Extra step dbscan begins ################
+    ## Clustering
+    ## dbscan clustering - method 2
     
     # Fit a density based cluster
-    dbscan.fit=dbscan(clust.data2, 0.2, minPts = 3)
+    dbscan.fit=dbscan(clust.data2, 0.2, thresh+1)
     db.clust=cbind(Run=clust.data$Run,clust.data2,Cluster=dbscan.fit$cluster)
     
     # Export the scored runs
@@ -362,20 +366,15 @@ var.importance=
     dev.off()
     
     # Find isolated clusters
-    clust.count=aggregate(db.clust$Cluster,by=list(db.clust$Cluster),FUN=length)
-    colnames(clust.count)=c("Cluster","Count")
-    isolated=clust.count[which(clust.count$Count<= 
-                                 floor(0.05*max(as.numeric(as.character(clust.data$Run))))),]
-    isolated.clusters=db.clust[which(db.clust$Cluster==isolated$Cluster),]
-    
+    isolated.clusters=db.clust[which(db.clust$Cluster == 0),]
+
     # Export the isolated cluster list (if exisit)
-    if(exists("isolated.clusters")==TRUE){
+    if(nrow(isolated.clusters)!=0){
       write.csv(isolated.clusters,paste(output,"db_isolated_",list[j],".csv",sep=""))
       rm(isolated.clusters)
     }
     
-    ## Extra step dbscan end ##################
-    
+    # Publish the variable importance calculated in earlier steps as foreach output
     var.importance
     
   }
